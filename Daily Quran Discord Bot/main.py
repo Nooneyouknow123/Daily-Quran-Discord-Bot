@@ -49,7 +49,7 @@ async def on_ready():
     # Set status
     activity = discord.Activity(
         type=discord.ActivityType.listening,
-        name="/help to setup | 1 command setup"
+        name="/support for help! | Daily Quran Bot"
     )
     await bot.change_presence(activity=activity)
 

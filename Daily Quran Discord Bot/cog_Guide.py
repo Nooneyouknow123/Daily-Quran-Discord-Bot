@@ -66,7 +66,7 @@ class GuideCog(commands.Cog):
             value="• Check bot permissions in the channel\n"
                   "• Ensure you're using the correct command format\n"
                   "• Make sure the target channel is accessible\n"
-                  "• Contact marty_fabio_ if issues persist",
+                  "• /support to get the link of our support server",
             inline=False
         )
         
