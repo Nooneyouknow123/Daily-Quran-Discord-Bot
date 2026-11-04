@@ -1,112 +1,38 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import sqlite3
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-# ----------------------------------------------------
-
-def console_log(message):
-    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}")
-
-def log_error(error_message):
-    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - ERROR: {error_message}")
+from utils import (
+    console_log,
+    log_error,
+    db_connect,
+    init_db,
+    utcnow,
+    is_admin,
+    bot_can_post,
+    parse_interval
+)
 
 # ----------------------------------------------------
 
 class ChannelCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.setup_db()
-
-    def setup_db(self):
-        conn = None
-
-        try:
-            conn = sqlite3.connect('quran_bot.db')
-            c = conn.cursor()
-
-            c.execute('''
-                CREATE TABLE IF NOT EXISTS server_settings (
-                    server_id INTEGER PRIMARY KEY,
-                    channel_id INTEGER,
-                    time_interval REAL,
-                    current_verse TEXT,
-                    next_send_utc TIMESTAMP,
-                    last_sent_utc TIMESTAMP,
-                    role_id INTEGER
-                )
-            ''')
-
-            #  Add role_id to old databases
-            c.execute("PRAGMA table_info(server_settings)")
-            columns = [row[1] for row in c.fetchall()]
-
-            if "role_id" not in columns:
-                c.execute(
-                    "ALTER TABLE server_settings ADD COLUMN role_id INTEGER"
-                )
-                console_log("Added role_id column to server_settings")
-
-            conn.commit()
-            console_log("Database setup completed")
-
-        except Exception as e:
-            log_error(f"Database setup error: {e}")
-
-        finally:
-            if conn:
-                conn.close()
+        init_db()
 
     async def is_admin(self, interaction):
-        return interaction.user.guild_permissions.administrator
+        return is_admin(interaction)
 
     async def check_bot_permissions(self, channel):
-        bot_member = channel.guild.get_member(self.bot.user.id)
-
-        if not bot_member:
-            return False
-
-        permissions = channel.permissions_for(bot_member)
-
-        return (
-            permissions.view_channel
-            and permissions.send_messages
-            and permissions.embed_links
-        )
+        return bot_can_post(self.bot, channel)
 
     def parse_time_input(self, time_str):
-        if not time_str or not time_str.strip():
-            raise ValueError("Please provide a time interval.")
-
-        time_str = time_str.lower().strip().replace(' ', '')
-
-        match = re.match(r'^(\d+)([mh])$', time_str)
-
-        if not match:
-            raise ValueError(
-                "Invalid format. Use something like: 30m, 2h, 90m."
-            )
-
-        number, unit = match.groups()
-        number = int(number)
-
-        if unit == 'h':
-            hours = number
-        else:
-            hours = number / 60.0
-
-        if hours < (5 / 60):
-            raise ValueError("Time interval must be at least 5 minutes.")
-
-        if hours > 168:
-            raise ValueError("Time interval cannot be more than 1 week.")
-
-        return hours
+        return parse_interval(time_str)
 
     def calculate_next_send_utc(self, interval_hours):
-        return datetime.utcnow() + timedelta(hours=interval_hours)
+        return utcnow() + timedelta(hours=interval_hours)
 
     def format_interval(self, hours):
         if hours >= 1:
@@ -119,6 +45,7 @@ class ChannelCog(commands.Cog):
         name="setup",
         description="Set up Quran verses channel and interval"
     )
+    @app_commands.guild_only()
     @app_commands.describe(
         channel="Select channel for Quran verses",
         interval="Time interval (e.g. 30m, 2h, 90m)",
@@ -162,10 +89,27 @@ class ChannelCog(commands.Cog):
                 )
                 return
 
+        #  Validate the interval
         try:
             hours = self.parse_time_input(interval)
 
-            conn = sqlite3.connect('quran_bot.db')
+        except ValueError as e:
+            await interaction.response.send_message(
+                f"❌ {str(e)}\n\n"
+                "**Examples:** 30m, 2h, 90m\n"
+                "**Minimum:** 5 minutes",
+                ephemeral=True
+            )
+            return
+
+        #  Sending the first verse can take a moment, so acknowledge now
+        #  and answer for real once we know how it went.
+        await interaction.response.defer(ephemeral=True)
+
+        conn = None
+
+        try:
+            conn = db_connect()
             c = conn.cursor()
 
             #  Check if this server already has a setup
@@ -200,11 +144,12 @@ class ChannelCog(commands.Cog):
 
                 conn.commit()
                 conn.close()
+                conn = None
 
                 role_display = role.mention if role else "No role ping"
                 time_display = self.format_interval(hours)
 
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"✅ Quran settings updated.\n"
                     f"**Channel:** {channel.mention}\n"
                     f"**Interval:** {time_display}\n"
@@ -243,71 +188,88 @@ class ChannelCog(commands.Cog):
 
             conn.commit()
             conn.close()
+            conn = None
 
             role_display = role.mention if role else "No role ping"
             time_display = self.format_interval(hours)
 
-            await interaction.response.send_message(
-                f"✅ Quran verses will be sent to {channel.mention} "
-                f"every {time_display}.\n"
-                f"**Ping role:** {role_display}\n\n"
-                f"**First verse sent!** 📖",
-                ephemeral=True
-            )
-
             #  Send the first verse immediately
             verse_cog = self.bot.get_cog('VerseCog')
 
-            if verse_cog:
-                success = await verse_cog.send_verse_to_server(
-                    interaction.guild.id,
-                    scheduled_time=datetime.utcnow()
-                )
-
-                #  Remove the setup if the first send completely failed
-                if not success:
-                    conn = sqlite3.connect('quran_bot.db')
-                    c = conn.cursor()
-
-                    c.execute(
-                        '''
-                        DELETE FROM server_settings
-                        WHERE server_id = ?
-                        ''',
-                        (interaction.guild.id,)
-                    )
-
-                    conn.commit()
-                    conn.close()
-
-                    log_error(
-                        f"Initial verse failed for server "
-                        f"{interaction.guild.id}; setup rolled back"
-                    )
-
-            else:
+            if not verse_cog:
                 log_error(
                     "VerseCog not found when trying to send first verse"
                 )
 
-        except ValueError as e:
-            await interaction.response.send_message(
-                f"❌ {str(e)}\n\n"
-                "**Examples:** 30m, 2h, 90m\n"
-                "**Minimum:** 5 minutes",
-                ephemeral=True
+                await interaction.followup.send(
+                    f"✅ Quran verses will be sent to {channel.mention} "
+                    f"every {time_display}.\n"
+                    f"**Ping role:** {role_display}",
+                    ephemeral=True
+                )
+
+                return
+
+            success = await verse_cog.send_verse_to_server(
+                interaction.guild.id,
+                scheduled_time=utcnow(),
+                notify=False  # the admin is told right here, no DM needed
             )
 
+            if success:
+                await interaction.followup.send(
+                    f"✅ Quran verses will be sent to {channel.mention} "
+                    f"every {time_display}.\n"
+                    f"**Ping role:** {role_display}\n\n"
+                    f"**First verse sent!** 📖",
+                    ephemeral=True
+                )
+
+            else:
+                #  Remove the setup if the first send completely failed
+                conn = db_connect()
+                c = conn.cursor()
+
+                c.execute(
+                    '''
+                    DELETE FROM server_settings
+                    WHERE server_id = ?
+                    ''',
+                    (interaction.guild.id,)
+                )
+
+                conn.commit()
+                conn.close()
+                conn = None
+
+                log_error(
+                    f"Initial verse failed for server "
+                    f"{interaction.guild.id}; setup rolled back"
+                )
+
+                await interaction.followup.send(
+                    f"❌ I couldn't send the first verse to {channel.mention}, "
+                    f"so the setup was **not saved**.\n\n"
+                    "**Please check that I have:** View Channel, "
+                    "Send Messages and Embed Links in that channel, "
+                    "then run `/setup` again.",
+                    ephemeral=True
+                )
+
         except Exception as e:
-            log_error(f"Setup command error: {e}")
+            log_error(f"Setup command error: {e}", interaction=interaction)
 
             try:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ An error occurred during setup. Please try again.",
                     ephemeral=True
                 )
-            except discord.InteractionResponded:
+            except Exception:
                 pass
+
+        finally:
+            if conn:
+                conn.close()
 
 # ----------------------------------------------------
 

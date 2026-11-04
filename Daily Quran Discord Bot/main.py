@@ -4,16 +4,9 @@ import discord
 from discord.ext import commands
 import os
 import sys
-from datetime import datetime
-import asyncio
 
-# ----------------------------------------------------
-
-def console_log(message):
-    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}")
-
-def log_error(error_message):
-    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - ERROR: {error_message}")
+import tracker
+from utils import console_log, log_error, init_db, utcnow
 
 # ----------------------------------------------------
 
@@ -25,31 +18,53 @@ except ImportError:
     console_log("python-dotenv not installed, using system environment variables")
 
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = False
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+activity = discord.Activity(
+    type=discord.ActivityType.listening,
+    name="/support for help! | Daily Quran Bot"
+)
+
+bot = commands.Bot(
+    command_prefix='!',
+    intents=intents,
+    activity=activity
+)
+
+#  Used by /stats to show the real uptime
+bot.start_time = utcnow()
 
 # ----------------------------------------------------
 
-#  Run when bot login
+async def load_cogs():
+    cog_files = sorted(
+        f for f in os.listdir('.')
+        if f.endswith('.py') and f.startswith('cog_')
+    )
+
+    console_log(f"Found {len(cog_files)} cog files: {cog_files}")
+
+    for filename in cog_files:
+        try:
+            cog_name = filename[:-3]
+            await bot.load_extension(cog_name)
+            console_log(f'Loaded cog: {filename}')
+
+        except Exception as e:
+            error_msg = f"Failed to load cog {filename}: {str(e)}"
+            log_error(error_msg)
+
+
+#  setup_hook runs exactly ONCE per start (on_ready can fire again after
+#  every reconnect, which used to try to re-load all the cogs).
 @bot.event
-async def on_ready():
-    console_log(f'{bot.user} has logged in!')
-    console_log(f'Bot ID: {bot.user.id}')
-    console_log(f'Connected to {len(bot.guilds)} servers')
+async def setup_hook():
+    #  Make sure the database exists before any cog needs it
+    init_db()
+    tracker.ensure_tables()
 
     #  Load cogs first
     await load_cogs()
-    
-    #  Wait a moment for commands to register
-    await asyncio.sleep(1)
-    
-    #  Set status
-    activity = discord.Activity(
-        type=discord.ActivityType.listening,
-        name="/support for help! | Daily Quran Bot"
-    )
-    await bot.change_presence(activity=activity)
 
     #  Sync commands after loading cogs
     try:
@@ -61,10 +76,16 @@ async def on_ready():
 
     except Exception as e:
         error_msg = f"Failed to sync commands: {e}"
-        console_log(error_msg)
         log_error(error_msg)
 
 # ----------------------------------------------------
+
+#  Run when bot login
+@bot.event
+async def on_ready():
+    console_log(f'{bot.user} has logged in!')
+    console_log(f'Bot ID: {bot.user.id}')
+    console_log(f'Connected to {len(bot.guilds)} servers')
 
 #  Log when joining or leaving a server
 @bot.event
@@ -75,32 +96,20 @@ async def on_guild_join(guild):
 async def on_guild_remove(guild):
     console_log(f'Left server: {guild.name} (ID: {guild.id})')
 
-async def load_cogs():
-    cog_files = [
-        f for f in os.listdir('.')
-        if f.endswith('.py') and f.startswith('cog_')
-    ]
-
-    console_log(f"Found {len(cog_files)} cog files: {cog_files}")
-    
-    for filename in cog_files:
-        try:
-            cog_name = filename[:-3]
-            await bot.load_extension(cog_name)
-            console_log(f'Loaded cog: {filename}')
-
-        except Exception as e:
-            error_msg = f"Failed to load cog {filename}: {str(e)}"
-            console_log(error_msg)
-            log_error(error_msg)
-
 # ----------------------------------------------------
 
 #  Error handling
-@bot.event
+#  (discord.py routes slash command errors to the command tree, so the
+#  handler has to be registered there to actually be called.)
+@bot.tree.error
 async def on_app_command_error(interaction, error):
-    error_msg = f"Slash command error in {interaction.command.name}: {str(error)}"
-    log_error(error_msg)
+    command_name = interaction.command.name if interaction.command else "unknown"
+    original = getattr(error, 'original', error)
+    error_msg = (
+        f"Slash command error in {command_name}: "
+        f"{type(original).__name__}: {str(original)}"
+    )
+    log_error(error_msg, interaction=interaction)
 
     try:
         if not interaction.response.is_done():
@@ -108,7 +117,7 @@ async def on_app_command_error(interaction, error):
                 "❌ An error occurred. Please try again.",
                 ephemeral=True
             )
-    except:
+    except Exception:
         pass
 
 # ----------------------------------------------------
@@ -121,7 +130,7 @@ if __name__ == "__main__":
         console_log("ERROR: TOKEN not found in environment variables")
         log_error("TOKEN not found in environment variables")
         sys.exit(1)
-    
+
     console_log("Starting Daily Quran Bot...")
 
     try:
@@ -129,7 +138,6 @@ if __name__ == "__main__":
 
     except Exception as e:
         error_msg = f"Bot failed to start: {str(e)}"
-        console_log(error_msg)
         log_error(error_msg)
 
 # ----------------------------------------------------
