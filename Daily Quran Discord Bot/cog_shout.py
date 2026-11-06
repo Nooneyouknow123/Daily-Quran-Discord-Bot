@@ -1,20 +1,12 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import sqlite3
-from datetime import datetime
+
+from utils import console_log, log_error, db_connect
 
 # ----------------------------------------------------
 
 OWNER_ID = 1274667778300706866
-
-# ----------------------------------------------------
-
-def console_log(message):
-    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}")
-
-def log_error(error_message):
-    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - ERROR: {error_message}")
 
 # ----------------------------------------------------
 
@@ -42,7 +34,7 @@ class ShoutCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            conn = sqlite3.connect('quran_bot.db')
+            conn = db_connect()
             c = conn.cursor()
 
             c.execute(
@@ -106,7 +98,7 @@ class ShoutCog(commands.Cog):
             )
 
         except Exception as e:
-            log_error(f"Shout command error: {str(e)}")
+            log_error(f"Shout command error: {str(e)}", interaction=interaction)
 
             await interaction.followup.send(
                 "❌ An error occurred while sending the shout.",

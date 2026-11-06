@@ -1,25 +1,19 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import sqlite3
-from datetime import datetime
-# ----------------------------------------------------
-def console_log(message):
-    with open('console.txt', 'a', encoding='utf-8') as f:
-        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
 
-def log_error(error_message):
-    with open('errors.txt', 'a', encoding='utf-8') as f:
-        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {error_message}\n")
+from utils import console_log, log_error, db_connect, is_admin, clear_owner_notices
+# ----------------------------------------------------
 
 class ResetCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     async def is_admin(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.guild_permissions.administrator
+        return is_admin(interaction)
 
     @app_commands.command(name="reset", description="Completely reset bot settings for this server")
+    @app_commands.guild_only()
     async def reset(self, interaction: discord.Interaction):
         """Reset bot to fresh state - removes channel, resets verses, clears settings"""
         
@@ -72,13 +66,16 @@ class ResetCog(commands.Cog):
                 
                 # Perform the reset
                 try:
-                    conn = sqlite3.connect('quran_bot.db')
+                    conn = db_connect()
                     c = conn.cursor()
                     
                     # Delete server settings
                     c.execute('DELETE FROM server_settings WHERE server_id = ?', (interaction.guild.id,))
                     conn.commit()
                     conn.close()
+
+                    # A fresh start also means fresh owner notices
+                    clear_owner_notices(interaction.guild.id)
                     
                     # Success embed
                     success_embed = discord.Embed(
@@ -98,7 +95,7 @@ class ResetCog(commands.Cog):
                     
                 except Exception as e:
                     error_msg = f"Reset command database error: {str(e)}"
-                    log_error(error_msg)
+                    log_error(error_msg, interaction=interaction)
                     await interaction.response.edit_message(
                         content="❌ Failed to reset bot settings. Please try again.",
                         embed=None,
@@ -121,7 +118,7 @@ class ResetCog(commands.Cog):
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         except Exception as e:
             error_msg = f"Reset command error: {str(e)}"
-            log_error(error_msg)
+            log_error(error_msg, interaction=interaction)
             try:
                 await interaction.response.send_message(
                     "❌ Failed to start reset process. Please try again.",
