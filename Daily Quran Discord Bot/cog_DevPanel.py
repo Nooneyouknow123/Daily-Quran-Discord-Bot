@@ -22,9 +22,9 @@ from utils import (
 #  SETTINGS 
 # ====================================================
 
-DEV_GUILD_ID = 1567608193683693738           # the server where the dev panel lives
-DEV_CHANNEL_ID = 1567608279167803435         # the channel the live panel is posted in
-DEV_ALERT_CHANNEL_ID = 1567608279167803435    # optional: separate channel for error alerts
+DEV_GUILD_ID = 1427658196662882325         # the server where the dev panel lives
+DEV_CHANNEL_ID = 1567623212446122226        # the channel the live panel is posted in
+DEV_ALERT_CHANNEL_ID = 1567623267219411164    # optional: separate channel for error alerts
                                
 
 DEV_USER_IDS = {1274667778300706866}   # only these users can use the panel

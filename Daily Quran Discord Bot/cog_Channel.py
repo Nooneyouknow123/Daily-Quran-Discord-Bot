@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import re
 from datetime import timedelta
 
 from utils import (
@@ -15,7 +14,28 @@ from utils import (
     parse_interval
 )
 
+from languages import LANGUAGES, get_language_name
+
 # ----------------------------------------------------
+
+async def language_autocomplete(interaction, current: str):
+    current = current.lower()
+
+    choices = []
+
+    for code, details in LANGUAGES.items():
+        name = details["name"]
+
+        if current in code.lower() or current in name.lower():
+            choices.append(
+                app_commands.Choice(
+                    name=f"{name} ({code})",
+                    value=code
+                )
+            )
+
+    return choices[:25]
+
 
 class ChannelCog(commands.Cog):
     def __init__(self, bot):
@@ -49,18 +69,28 @@ class ChannelCog(commands.Cog):
     @app_commands.describe(
         channel="Select channel for Quran verses",
         interval="Time interval (e.g. 30m, 2h, 90m)",
-        role="Role to ping with each Quran verse"
+        role="Role to ping with each Quran verse",
+        language="Translation language for this server"
     )
+    @app_commands.autocomplete(language=language_autocomplete)
     async def setup(
         self,
         interaction: discord.Interaction,
         channel: discord.TextChannel,
         interval: str,
-        role: discord.Role = None
+        role: discord.Role = None,
+        language: str = None
     ):
         if not await self.is_admin(interaction):
             await interaction.response.send_message(
                 "❌ You need **Administrator** permissions to use this command.",
+                ephemeral=True
+            )
+            return
+
+        if language is not None and language not in LANGUAGES:
+            await interaction.response.send_message(
+                "❌ Invalid language. Please select a language from the list.",
                 ephemeral=True
             )
             return
@@ -73,7 +103,7 @@ class ChannelCog(commands.Cog):
             )
             return
 
-        #  Validate the selected role
+        # Validate the selected role
         if role:
             if role.is_default():
                 await interaction.response.send_message(
@@ -89,7 +119,7 @@ class ChannelCog(commands.Cog):
                 )
                 return
 
-        #  Validate the interval
+        # Validate the interval
         try:
             hours = self.parse_time_input(interval)
 
@@ -102,8 +132,6 @@ class ChannelCog(commands.Cog):
             )
             return
 
-        #  Sending the first verse can take a moment, so acknowledge now
-        #  and answer for real once we know how it went.
         await interaction.response.defer(ephemeral=True)
 
         conn = None
@@ -112,10 +140,14 @@ class ChannelCog(commands.Cog):
             conn = db_connect()
             c = conn.cursor()
 
-            #  Check if this server already has a setup
+            # Check if this server already has a setup
             c.execute(
                 '''
-                SELECT current_verse, next_send_utc, last_sent_utc
+                SELECT
+                    current_verse,
+                    next_send_utc,
+                    last_sent_utc,
+                    translation_language
                 FROM server_settings
                 WHERE server_id = ?
                 ''',
@@ -125,19 +157,23 @@ class ChannelCog(commands.Cog):
             existing = c.fetchone()
 
             if existing:
-                #  Update settings without resetting progress or schedule
+                # Keep the current language if none was selected.
+                selected_language = language or existing[3] or "en"
+
                 c.execute(
                     '''
                     UPDATE server_settings
                     SET channel_id = ?,
                         time_interval = ?,
-                        role_id = ?
+                        role_id = ?,
+                        translation_language = ?
                     WHERE server_id = ?
                     ''',
                     (
                         channel.id,
                         hours,
                         role.id if role else None,
+                        selected_language,
                         interaction.guild.id
                     )
                 )
@@ -148,19 +184,22 @@ class ChannelCog(commands.Cog):
 
                 role_display = role.mention if role else "No role ping"
                 time_display = self.format_interval(hours)
+                language_display = get_language_name(selected_language)
 
                 await interaction.followup.send(
                     f"✅ Quran settings updated.\n"
                     f"**Channel:** {channel.mention}\n"
                     f"**Interval:** {time_display}\n"
-                    f"**Ping role:** {role_display}\n\n"
+                    f"**Ping role:** {role_display}\n"
+                    f"**Translation:** {language_display}\n\n"
                     f"Your verse progress and existing schedule were preserved.",
                     ephemeral=True
                 )
 
                 return
 
-            #  Create the first setup
+            # Create the first setup
+            selected_language = language or "en"
             next_send_utc = self.calculate_next_send_utc(hours)
 
             c.execute(
@@ -172,9 +211,10 @@ class ChannelCog(commands.Cog):
                     current_verse,
                     next_send_utc,
                     last_sent_utc,
-                    role_id
+                    role_id,
+                    translation_language
                 )
-                VALUES (?, ?, ?, ?, ?, NULL, ?)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
                 ''',
                 (
                     interaction.guild.id,
@@ -182,7 +222,8 @@ class ChannelCog(commands.Cog):
                     hours,
                     "1|1",
                     next_send_utc.strftime('%Y-%m-%d %H:%M:%S'),
-                    role.id if role else None
+                    role.id if role else None,
+                    selected_language
                 )
             )
 
@@ -192,8 +233,9 @@ class ChannelCog(commands.Cog):
 
             role_display = role.mention if role else "No role ping"
             time_display = self.format_interval(hours)
+            language_display = get_language_name(selected_language)
 
-            #  Send the first verse immediately
+            # Send the first verse immediately
             verse_cog = self.bot.get_cog('VerseCog')
 
             if not verse_cog:
@@ -204,7 +246,8 @@ class ChannelCog(commands.Cog):
                 await interaction.followup.send(
                     f"✅ Quran verses will be sent to {channel.mention} "
                     f"every {time_display}.\n"
-                    f"**Ping role:** {role_display}",
+                    f"**Ping role:** {role_display}\n"
+                    f"**Translation:** {language_display}",
                     ephemeral=True
                 )
 
@@ -213,20 +256,21 @@ class ChannelCog(commands.Cog):
             success = await verse_cog.send_verse_to_server(
                 interaction.guild.id,
                 scheduled_time=utcnow(),
-                notify=False  # the admin is told right here, no DM needed
+                notify=False
             )
 
             if success:
                 await interaction.followup.send(
                     f"✅ Quran verses will be sent to {channel.mention} "
                     f"every {time_display}.\n"
-                    f"**Ping role:** {role_display}\n\n"
+                    f"**Ping role:** {role_display}\n"
+                    f"**Translation:** {language_display}\n\n"
                     f"**First verse sent!** 📖",
                     ephemeral=True
                 )
 
             else:
-                #  Remove the setup if the first send completely failed
+                # Remove the setup if the first send completely failed.
                 conn = db_connect()
                 c = conn.cursor()
 
@@ -257,7 +301,10 @@ class ChannelCog(commands.Cog):
                 )
 
         except Exception as e:
-            log_error(f"Setup command error: {e}", interaction=interaction)
+            log_error(
+                f"Setup command error: {e}",
+                interaction=interaction
+            )
 
             try:
                 await interaction.followup.send(
@@ -270,6 +317,7 @@ class ChannelCog(commands.Cog):
         finally:
             if conn:
                 conn.close()
+
 
 # ----------------------------------------------------
 

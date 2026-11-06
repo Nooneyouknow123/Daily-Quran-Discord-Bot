@@ -1,3 +1,4 @@
+
 import random
 
 import discord
@@ -5,8 +6,28 @@ from discord.ext import commands
 from discord import app_commands
 
 from utils import console_log, log_error, is_admin
+from languages import LANGUAGES
 
 # ----------------------------------------------------
+
+async def language_autocomplete(interaction, current: str):
+    current = current.lower()
+
+    choices = []
+
+    for code, details in LANGUAGES.items():
+        name = details["name"]
+
+        if current in code.lower() or current in name.lower():
+            choices.append(
+                app_commands.Choice(
+                    name=f"{name} ({code})",
+                    value=code
+                )
+            )
+
+    return choices[:25]
+
 
 class RandomVerseCog(commands.Cog):
     def __init__(self, bot):
@@ -17,16 +38,17 @@ class RandomVerseCog(commands.Cog):
         description="Get a random Quran verse"
     )
     @app_commands.describe(
+        language="Choose the translation language",
         public="Post it in this channel for everyone to see (admins only)"
     )
+    @app_commands.autocomplete(language=language_autocomplete)
     async def random_verse(
         self,
         interaction: discord.Interaction,
+        language: str,
         public: bool = False
     ):
-        """Get a random verse. It's private by default, but admins can
-        choose to post it publicly. Doesn't affect scheduled verses
-        or the bot's saved progress."""
+        """Get a random verse without affecting scheduled progress."""
 
         try:
             if public and not is_admin(interaction):
@@ -34,6 +56,13 @@ class RandomVerseCog(commands.Cog):
                     "❌ Only **Administrators** can post a random verse for "
                     "everyone. Use the command without `public` to see one "
                     "privately.",
+                    ephemeral=True
+                )
+                return
+
+            if language not in LANGUAGES:
+                await interaction.response.send_message(
+                    "❌ Invalid language. Please select a language from the list.",
                     ephemeral=True
                 )
                 return
@@ -50,10 +79,12 @@ class RandomVerseCog(commands.Cog):
 
             verse_line = random.choice(verse_cog.verses)
 
-            embed = verse_cog.create_embed(verse_line)
+            embed = verse_cog.create_embed(
+                verse_line,
+                translation_language=language
+            )
 
-            # Add a small label at the bottom of the embed.
-            embed.set_footer(text="Random Verse")
+            embed.title = f"🎲 Random Verse - {embed.title}"
 
             await interaction.response.send_message(
                 embed=embed,
@@ -61,13 +92,18 @@ class RandomVerseCog(commands.Cog):
             )
 
             where = interaction.guild.name if interaction.guild else "DM"
+
             console_log(
                 f"Random verse ({'public' if public else 'private'}) "
-                f"used by {interaction.user} in {where}"
+                f"used by {interaction.user} in {where} "
+                f"with language {language}"
             )
 
         except Exception as e:
-            log_error(f"Random verse command error: {str(e)}", interaction=interaction)
+            log_error(
+                f"Random verse command error: {str(e)}",
+                interaction=interaction
+            )
 
             try:
                 if not interaction.response.is_done():
@@ -78,9 +114,11 @@ class RandomVerseCog(commands.Cog):
             except Exception:
                 pass
 
+
 # ----------------------------------------------------
 
 async def setup(bot):
     await bot.add_cog(RandomVerseCog(bot))
 
 # ----------------------------------------------------
+
