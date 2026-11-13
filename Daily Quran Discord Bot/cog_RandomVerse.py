@@ -79,15 +79,15 @@ class RandomVerseCog(commands.Cog):
 
             verse_line = random.choice(verse_cog.verses)
 
-            embed = verse_cog.create_embed(
+            embeds = verse_cog.create_embeds(
                 verse_line,
                 translation_language=language
             )
 
-            embed.title = f"🎲 Random Verse - {embed.title}"
+            embeds[0].title = f"🎲 Random Verse - {embeds[0].title}"
 
             await interaction.response.send_message(
-                embed=embed,
+                embeds=embeds,
                 ephemeral=not public
             )
 
@@ -121,4 +121,5 @@ async def setup(bot):
     await bot.add_cog(RandomVerseCog(bot))
 
 # ----------------------------------------------------
+
 

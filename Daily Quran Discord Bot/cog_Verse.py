@@ -1,3 +1,4 @@
+
 import discord
 from discord.ext import commands
 from datetime import datetime, timedelta
@@ -93,7 +94,7 @@ class VerseCog(commands.Cog):
         except Exception:
             return "1|1"
 
-    def create_embed(
+    def create_embeds(
         self,
         verse_line,
         was_down=False,
@@ -121,24 +122,52 @@ class VerseCog(commands.Cog):
         _, _, translated_text = self.parse_verse(translated_line)
         language_name = get_language_name(translation_language)
 
-        embed = discord.Embed(
-            title=f"📖 Quran Verse - Surah {surah}, Verse {verse}",
-            color=0xB8860B,
-            timestamp=datetime.now()
-        )
+        title = f"📖 Quran Verse - Surah {surah}, Verse {verse}"
 
-        embed.add_field(
-            name="Arabic",
-            value=arabic_text,
-            inline=False
-        )
+        def create_new_embed():
+            return discord.Embed(
+                title=title,
+                color=0xB8860B,
+                timestamp=datetime.now()
+            )
+
+        embeds = [create_new_embed()]
+
+        # Add text fields without exceeding Discord's embed limits.
+        def add_text_fields(name, text):
+            if not text:
+                text = "\u200b"
+
+            chunks = [
+                text[i:i + 1024]
+                for i in range(0, len(text), 1024)
+            ]
+
+            for i, chunk in enumerate(chunks):
+                embed = embeds[-1]
+                field_name = name if i == 0 else "\u200b"
+
+                if (
+                    len(embed.fields) >= 25
+                    or len(embed) + len(field_name) + len(chunk) > 6000
+                ):
+                    embed = create_new_embed()
+                    embeds.append(embed)
+                    field_name = name
+
+                embed.add_field(
+                    name=field_name,
+                    value=chunk,
+                    inline=False
+                )
+
+        add_text_fields("Arabic", arabic_text)
 
         # Don't show Arabic twice if Arabic is the selected language.
         if translation_language != "ar":
-            embed.add_field(
-                name=f"Translation • {language_name}",
-                value=translated_text,
-                inline=False
+            add_text_fields(
+                f"Translation • {language_name}",
+                translated_text
             )
 
         if was_down:
@@ -153,24 +182,25 @@ class VerseCog(commands.Cog):
                     "Resuming regular schedule."
                 )
 
-            embed.add_field(
-                name="📝 Note",
-                value=notice,
-                inline=False
-            )
+            add_text_fields("📝 Note", notice)
 
-        embed.add_field(
-            name="🔗 Support Server",
-            value="[Join our support server](https://discord.gg/MTSRd8BvMP)",
-            inline=False
+        add_text_fields(
+            "🔗 Support Server",
+            "[Join our support server](https://discord.gg/MTSRd8BvMP)"
         )
 
-        embed.set_footer(
-            text=f"Translation: {language_name} • "
-                 "Daily Quran • May Allah bless you with this reminder"
+        footer_text = (
+            f"Translation: {language_name} • "
+            "Daily Quran • May Allah bless you with this reminder"
         )
 
-        return embed
+        # Keep the footer within the 6,000-character limit too.
+        if len(embeds[-1]) + len(footer_text) > 6000:
+            embeds.append(create_new_embed())
+
+        embeds[-1].set_footer(text=footer_text)
+
+        return embeds
 
     # What the server owner is told for each type of problem
     OWNER_NOTICES = {
@@ -458,7 +488,7 @@ class VerseCog(commands.Cog):
                     conn.commit()
                     role = None
 
-            embed = self.create_embed(
+            embeds = self.create_embeds(
                 full_verse_text,
                 was_down=was_down,
                 missed_count=missed_count,
@@ -467,15 +497,17 @@ class VerseCog(commands.Cog):
 
             content = role.mention if role else None
 
-            await channel.send(
-                content=content,
-                embed=embed,
-                allowed_mentions=discord.AllowedMentions(
-                    roles=True
+            # Send each embed as a separate message.
+            for i, embed in enumerate(embeds):
+                await channel.send(
+                    content=content if i == 0 else None,
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions(
+                        roles=True
+                    )
                 )
-            )
 
-            # Only update progress after Discord accepted the message.
+            # Only update progress after Discord accepted all messages.
             next_verse = self.get_next_verse(current_verse)
 
             interval_duration = timedelta(hours=time_interval)
@@ -567,3 +599,4 @@ async def setup(bot):
     await bot.add_cog(VerseCog(bot))
 
 # ----------------------------------------------------
+
