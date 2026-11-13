@@ -3,6 +3,11 @@ from discord.ext import commands
 from datetime import datetime, timedelta
 
 from utils import console_log, log_error, db_connect, utcnow, claim_owner_notice
+from languages import (
+    get_verse,
+    get_language_name,
+    get_language_lines
+)
 import tracker
 
 # ----------------------------------------------------
@@ -15,7 +20,7 @@ class VerseCog(commands.Cog):
         self.load_verses()
 
         console_log(
-            f"Loaded {len(self.verses)} verses from quran.txt"
+            f"Loaded {len(self.verses)} verses from quranlanguages/quran.txt"
         )
 
     def load_verses(self):
@@ -23,33 +28,17 @@ class VerseCog(commands.Cog):
         index = {}
 
         try:
-            with open('quran.txt', 'r', encoding='utf-8') as file:
-                for line in file:
-                    line = line.strip()
+            verses = get_language_lines("en")
 
-                    #  Skip blank lines and the "#" license/header comments
-                    if not line or line.startswith('#'):
-                        continue
+            for position, line in enumerate(verses):
+                parts = line.split('|', 2)
 
-                    parts = line.split('|', 2)
-
-                    if len(parts) >= 3:
-                        #  Lookup table: "surah|verse" -> position in list
-                        index.setdefault(
-                            f"{parts[0]}|{parts[1]}",
-                            len(verses)
-                        )
-
-                    verses.append(line)
-
-        except FileNotFoundError:
-            error_msg = "quran.txt file not found!"
-            console_log(error_msg)
-            log_error(error_msg)
-            verses, index = [], {}
+                if len(parts) >= 3:
+                    reference = f"{parts[0]}|{parts[1]}"
+                    index.setdefault(reference, position)
 
         except Exception as e:
-            error_msg = f"Error loading quran.txt: {e}"
+            error_msg = f"Error loading English verses: {e}"
             console_log(error_msg)
             log_error(error_msg)
             verses, index = [], {}
@@ -59,14 +48,12 @@ class VerseCog(commands.Cog):
         return verses
 
     def find_verse_index(self, current_verse):
-        """Position of a "surah|verse" reference in the verse list,
-        or None if it does not exist."""
+        """Find the position of a verse reference in the English list."""
         position = self.verse_index.get(current_verse)
 
         if position is not None:
             return position
 
-        #  Fallback for unusual stored values (old behaviour)
         for i, verse in enumerate(self.verses):
             if verse.startswith(current_verse):
                 return i
@@ -96,8 +83,6 @@ class VerseCog(commands.Cog):
                 return "1|1"
 
             next_verse = self.verses[(position + 1) % len(self.verses)]
-
-            #  Return only the next verse reference
             parts = next_verse.split('|', 2)
 
             if len(parts) >= 2:
@@ -112,16 +97,49 @@ class VerseCog(commands.Cog):
         self,
         verse_line,
         was_down=False,
-        missed_count=0
+        missed_count=0,
+        translation_language="en"
     ):
-        surah, verse, text = self.parse_verse(verse_line)
+        surah, verse, _ = self.parse_verse(verse_line)
+        reference = f"{surah}|{verse}"
+
+        # Always show Arabic, regardless of the selected translation.
+        arabic_line = get_verse("ar", reference)
+
+        if arabic_line:
+            _, _, arabic_text = self.parse_verse(arabic_line)
+        else:
+            arabic_text = "Arabic translation unavailable."
+
+        # Use English if an invalid language code is supplied.
+        translated_line = get_verse(translation_language, reference)
+
+        if not translated_line:
+            translation_language = "en"
+            translated_line = get_verse("en", reference)
+
+        _, _, translated_text = self.parse_verse(translated_line)
+        language_name = get_language_name(translation_language)
 
         embed = discord.Embed(
             title=f"📖 Quran Verse - Surah {surah}, Verse {verse}",
-            description=text,
             color=0xB8860B,
             timestamp=datetime.now()
         )
+
+        embed.add_field(
+            name="Arabic",
+            value=arabic_text,
+            inline=False
+        )
+
+        # Don't show Arabic twice if Arabic is the selected language.
+        if translation_language != "ar":
+            embed.add_field(
+                name=f"Translation • {language_name}",
+                value=translated_text,
+                inline=False
+            )
 
         if was_down:
             if missed_count <= 1:
@@ -148,12 +166,13 @@ class VerseCog(commands.Cog):
         )
 
         embed.set_footer(
-            text="Daily Quran • May Allah bless you with this reminder"
+            text=f"Translation: {language_name} • "
+                 "Daily Quran • May Allah bless you with this reminder"
         )
 
         return embed
 
-    #  What the server owner is told for each type of problem
+    # What the server owner is told for each type of problem
     OWNER_NOTICES = {
         'channel_missing': (
             "The verse channel no longer exists",
@@ -178,7 +197,7 @@ class VerseCog(commands.Cog):
         ),
         'no_embed_links': (
             "I can't embed links in the verse channel",
-            "I'm missing the **Embed Links** permission in the channel "
+            "I'm missing **Embed Links** permission in the channel "
             "where verses are sent.",
             "Give me **Embed Links** in that channel, or pick another "
             "channel with `/changechannel`."
@@ -192,8 +211,7 @@ class VerseCog(commands.Cog):
         ),
         'http_error': (
             "I couldn't post the verse",
-            "Discord returned an error when I tried to post in the verse "
-            "channel.",
+            "Discord returned an error when I tried to post the verse.",
             "Check my permissions in that channel, or pick another "
             "channel with `/changechannel`."
         ),
@@ -201,7 +219,7 @@ class VerseCog(commands.Cog):
 
     async def notify_owner(self, server_id, error_type, channel_id=None):
         """DM the server owner about a problem. Each owner is told only
-        ONCE per type of problem per server. Never raises."""
+        once per type of problem per server. Never raises."""
         try:
             guild = self.bot.get_guild(server_id)
 
@@ -213,7 +231,6 @@ class VerseCog(commands.Cog):
             if not notice:
                 return
 
-            #  Only the first caller gets True - everyone else stops here
             if not claim_owner_notice(server_id, error_type):
                 return
 
@@ -272,7 +289,6 @@ class VerseCog(commands.Cog):
             )
 
         except Exception as e:
-            #  Closed DMs etc. - never retried, never breaks the scheduler
             log_error(
                 f"Could not DM owner of server {server_id} "
                 f"({error_type}): {e}"
@@ -299,7 +315,8 @@ class VerseCog(commands.Cog):
                     channel_id,
                     current_verse,
                     time_interval,
-                    role_id
+                    role_id,
+                    translation_language
                 FROM server_settings
                 WHERE server_id = ?
                 ''',
@@ -315,8 +332,12 @@ class VerseCog(commands.Cog):
                 channel_id,
                 current_verse,
                 time_interval,
-                role_id
+                role_id,
+                translation_language
             ) = result
+
+            if not translation_language:
+                translation_language = "en"
 
             channel = self.bot.get_channel(channel_id)
 
@@ -333,7 +354,7 @@ class VerseCog(commands.Cog):
 
                 return False
 
-            #  Check bot permissions
+            # Check bot permissions
             bot_member = channel.guild.get_member(self.bot.user.id)
 
             if not bot_member:
@@ -383,7 +404,7 @@ class VerseCog(commands.Cog):
 
                 return False
 
-            #  Find the full verse text
+            # Find the full verse text and its reference.
             position = self.find_verse_index(current_verse)
             full_verse_text = (
                 self.verses[position] if position is not None else None
@@ -396,7 +417,7 @@ class VerseCog(commands.Cog):
                 )
                 return False
 
-            #  Find the configured role
+            # Find the configured role
             role = None
 
             if role_id:
@@ -435,19 +456,17 @@ class VerseCog(commands.Cog):
                     )
 
                     conn.commit()
-
                     role = None
 
             embed = self.create_embed(
                 full_verse_text,
-                was_down,
-                missed_count
+                was_down=was_down,
+                missed_count=missed_count,
+                translation_language=translation_language
             )
 
-            #  Mention the configured role
             content = role.mention if role else None
 
-            #  Send the verse first
             await channel.send(
                 content=content,
                 embed=embed,
@@ -456,15 +475,12 @@ class VerseCog(commands.Cog):
                 )
             )
 
-            #  Only update progress after Discord accepted the message
+            # Only update progress after Discord accepted the message.
             next_verse = self.get_next_verse(current_verse)
 
             interval_duration = timedelta(hours=time_interval)
-
-            #  Keep the schedule based on the original scheduled time
             next_send_utc = scheduled_time + interval_duration
 
-            #  Skip old schedule points until we reach the future
             current_utc = utcnow()
 
             while next_send_utc <= current_utc:
@@ -480,16 +496,13 @@ class VerseCog(commands.Cog):
                 ''',
                 (
                     next_verse,
-                    next_send_utc.strftime(
-                        '%Y-%m-%d %H:%M:%S'
-                    ),
+                    next_send_utc.strftime('%Y-%m-%d %H:%M:%S'),
                     server_id
                 )
             )
 
             conn.commit()
 
-            #  Statistics for the dev panel (never affects sending)
             tracker.record_verse_sent(server_id)
 
             console_log(
@@ -530,7 +543,6 @@ class VerseCog(commands.Cog):
                 f"Discord HTTP error in server {server_id}: {e}"
             )
 
-            #  5xx errors are Discord's own hiccups, not the owner's problem
             if notify and getattr(e, 'status', 0) < 500:
                 await self.notify_owner(
                     server_id, 'http_error', channel_id
@@ -547,6 +559,7 @@ class VerseCog(commands.Cog):
         finally:
             if conn:
                 conn.close()
+
 
 # ----------------------------------------------------
 

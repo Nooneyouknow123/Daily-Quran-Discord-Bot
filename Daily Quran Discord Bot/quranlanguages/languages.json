@@ -1,0 +1,118 @@
+{
+    "en": {
+        "name": "English",
+        "file": "quran.txt"
+    },
+    "zh": {
+        "name": "Chinese (Simplified)",
+        "file": "Chinese.txt"
+    },
+    "ur": {
+        "name": "Urdu",
+        "file": "Urdu.txt"
+    },
+    "tr": {
+        "name": "Turkish",
+        "file": "Turkish.txt"
+    },
+    "sv": {
+        "name": "Swedish",
+        "file": "Swedish.txt"
+    },
+    "sq": {
+        "name": "Albanian",
+        "file": "Albanian.txt"
+    },
+    "ru": {
+        "name": "Russian",
+        "file": "Russian.txt"
+    },
+    "ro": {
+        "name": "Romanian",
+        "file": "Romanian.txt"
+    },
+    "pt": {
+        "name": "Portuguese",
+        "file": "Portuguese.txt"
+    },
+    "pl": {
+        "name": "Polish",
+        "file": "Polish.txt"
+    },
+    "nb": {
+        "name": "Norwegian (Bokmål)",
+        "file": "Norwegian.txt"
+    },
+    "nl": {
+        "name": "Dutch",
+        "file": "Dutch.txt"
+    },
+    "it": {
+        "name": "Italian",
+        "file": "Italian.txt"
+    },
+    "id": {
+        "name": "Indonesian",
+        "file": "Indonesian.txt"
+    },
+    "hi": {
+        "name": "Hindi",
+        "file": "Hindi.txt"
+    },
+    "ha": {
+        "name": "Hausa",
+        "file": "Hausa.txt"
+    },
+    "fr": {
+        "name": "French",
+        "file": "French.txt"
+    },
+    "fa": {
+        "name": "Persian (Farsi)",
+        "file": "Persian.txt"
+    },
+    "es": {
+        "name": "Spanish",
+        "file": "Spanish.txt"
+    },
+    "am": {
+        "name": "Amharic",
+        "file": "Amharic.txt"
+    },
+    "ar": {
+        "name": "Arabic",
+        "file": "Arabic.txt"
+    },
+    "az": {
+        "name": "Azerbaijani",
+        "file": "Azerbaijani.txt"
+    },
+    "kab": {
+        "name": "Kabyle (Tamazight)",
+        "file": "Kabyle.txt"
+    },
+    "bg": {
+        "name": "Bulgarian",
+        "file": "Bulgarian.txt"
+    },
+    "bn": {
+        "name": "Bengali (Bangla)",
+        "file": "Bengali.txt"
+    },
+    "bs": {
+        "name": "Bosnian",
+        "file": "Bosnian.txt"
+    },
+    "cs": {
+        "name": "Czech",
+        "file": "Czech.txt"
+    },
+    "de": {
+        "name": "German",
+        "file": "German.txt"
+    },
+    "dv": {
+        "name": "Dhivehi (Maldivian)",
+        "file": "Dhivehi.txt"
+    }
+}

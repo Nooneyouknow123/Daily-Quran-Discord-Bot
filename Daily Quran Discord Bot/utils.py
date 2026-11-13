@@ -10,7 +10,6 @@ from logging.handlers import RotatingFileHandler
 
 DB_PATH = 'quran_bot.db'
 
-# Keep log files from getting too large by rotating them when needed.
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUPS = 3
 
@@ -60,12 +59,7 @@ def console_log(message):
 
 
 def log_error(error_message, interaction=None, track=True):
-    """Print the error and save it to errors.txt.
-
-    Errors are also sent to the tracker for the dev panel.
-    Pass the interaction when available so the command, server and user
-    IDs can be saved. Use track=False to skip error tracking.
-    """
+    """Print the error and save it to errors.txt."""
     line = f"{_stamp()} - {error_message}"
 
     try:
@@ -80,7 +74,7 @@ def log_error(error_message, interaction=None, track=True):
 
     if track:
         try:
-            import tracker  # Keep this import here to avoid circular imports.
+            import tracker
             tracker.record_error(error_message, interaction=interaction)
         except Exception:
             pass
@@ -105,7 +99,7 @@ def db_connect():
 
 
 def init_db():
-    """Create the required tables and add role_id if an older database is missing it."""
+    """Create required tables and migrate older databases."""
     conn = None
 
     try:
@@ -120,12 +114,11 @@ def init_db():
                 current_verse TEXT,
                 next_send_utc TIMESTAMP,
                 last_sent_utc TIMESTAMP,
-                role_id INTEGER
+                role_id INTEGER,
+                translation_language TEXT NOT NULL DEFAULT 'en'
             )
         ''')
 
-        # Keep track of which errors the server owner has already been notified about.
-        # This stops the bot from sending the same notice repeatedly.
         c.execute('''
             CREATE TABLE IF NOT EXISTS owner_notices (
                 server_id INTEGER,
@@ -139,8 +132,21 @@ def init_db():
         columns = [row[1] for row in c.fetchall()]
 
         if "role_id" not in columns:
-            c.execute("ALTER TABLE server_settings ADD COLUMN role_id INTEGER")
+            c.execute(
+                "ALTER TABLE server_settings ADD COLUMN role_id INTEGER"
+            )
             console_log("Added role_id column to server_settings")
+
+        if "translation_language" not in columns:
+            c.execute(
+                '''
+                ALTER TABLE server_settings
+                ADD COLUMN translation_language TEXT NOT NULL DEFAULT 'en'
+                '''
+            )
+            console_log(
+                "Added translation_language column to server_settings"
+            )
 
         conn.commit()
         return True
@@ -155,8 +161,7 @@ def init_db():
 
 
 def claim_owner_notice(server_id, error_type):
-    """Save an owner notice so the same problem isn't reported twice.
-    Returns True if this is the first notice, otherwise False."""
+    """Save an owner notice so the same problem isn't reported twice."""
     conn = None
 
     try:
